@@ -10,19 +10,15 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // 1. Check for the correct token key "accessToken"
     const token = localStorage.getItem('accessToken')
-    
     if (token) {
       setIsAuthenticated(true)
     } else {
       router.push('/login')
     }
-    
     setIsLoading(false)
   }, [router])
 
-  // 2. Loading State
   if (isLoading) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
@@ -34,14 +30,11 @@ export default function ChatPage() {
     )
   }
 
-  // 3. Redirecting (Render nothing while router pushes)
-  if (!isAuthenticated) {
-    return null
-  }
+  if (!isAuthenticated) return null
 
-  // 4. Authenticated - Show App
   return (
-    <div className="relative">
+    // ✅ FIX: Use full screen width/height and hide overflow
+    <div className="h-screen w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       <AIAssistantUI />
     </div>
   )

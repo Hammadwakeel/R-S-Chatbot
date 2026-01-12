@@ -3,10 +3,9 @@ import { motion, AnimatePresence } from "framer-motion"
 import { 
   PanelLeftClose, 
   PanelLeftOpen, 
-  SearchIcon, 
+  Search as SearchIcon, 
   Plus, 
   Clock, 
-  Settings, 
   LogIn 
 } from 'lucide-react'
 import SidebarSection from "./SidebarSection"
@@ -14,7 +13,7 @@ import ConversationRow from "./ConversationRow"
 import ThemeToggle from "./ThemeToggle"
 import SearchModal from "./SearchModal"
 import { cls } from "./utils"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { api, ChatSession, User } from "@/lib/api"
 import Link from "next/link"
 
@@ -29,8 +28,7 @@ interface SidebarProps {
   onSelect: (id: string | null) => void;
   sidebarCollapsed?: boolean;
   setSidebarCollapsed?: (collapsed: boolean) => void;
-  // Legacy props (ignored)
-  conversations?: any[];
+  conversations?: any[]; 
   pinned?: any[];
   recent?: any[];
   togglePin?: any;
@@ -38,7 +36,13 @@ interface SidebarProps {
   setQuery?: any;
   searchRef?: any;
   createNewChat?: any;
+  userData: User | null;
+  onDeleteChat: (id: string) => void;
 }
+
+// Simple in-memory cache
+let cachedConversations: ChatSession[] | null = null;
+let cachedUser: User | null = null;
 
 export default function Sidebar({
   open,
@@ -51,71 +55,121 @@ export default function Sidebar({
   onSelect,
   sidebarCollapsed = false,
   setSidebarCollapsed = () => {},
+  conversations: propConversations = [], 
+  userData: propUserData = null,
+  onDeleteChat,
+  createNewChat
 }: SidebarProps) {
   const [mounted, setMounted] = useState(false)
   const [showSearchModal, setShowSearchModal] = useState(false)
+  const [isMobile, setIsMobile] = useState(false) 
+
+  const [internalConversations, setInternalConversations] = useState<ChatSession[]>(cachedConversations || [])
+  const [internalUser, setInternalUser] = useState<User | null>(cachedUser)
+  const [loading, setLoading] = useState(!cachedConversations) 
   
-  // Real Data States
-  const [conversations, setConversations] = useState<ChatSession[]>([])
-  const [userData, setUserData] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [query, setQuery] = useState("")
+  const conversations = propConversations.length > 0 ? propConversations : internalConversations
+  const userData = propUserData || internalUser
+
+  const hasFetched = useRef(!!cachedConversations);
 
   useEffect(() => {
     setMounted(true)
-
-    const fetchData = async () => {
-      // 1. Load Cache
-      const cachedUser = localStorage.getItem("user")
-      if (cachedUser) {
-        try { setUserData(JSON.parse(cachedUser)) } catch (e) {}
-      }
-
-      try {
-        setLoading(true)
-        // 2. Fetch API
-        const [chats, profile] = await Promise.allSettled([
-          api.chat.list().catch(() => []),
-          api.user.getProfile().catch(() => null)
-        ])
-
-        if (chats.status === "fulfilled") {
-          setConversations(chats.value || [])
-        }
-        
-        if (profile.status === "fulfilled" && profile.value) {
-          setUserData(profile.value)
-          localStorage.setItem("user", JSON.stringify(profile.value))
-        } else if (profile.status === "fulfilled" && !profile.value) {
-          setUserData(null) 
-        }
-      } finally {
-        setLoading(false)
-      }
-    }
     
-    fetchData()
-  }, [])
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
 
-  // --- Search Logic (Fixed) ---
-  const filteredConversations = conversations.filter(c => {
-    // Safety check: Fallback to "New Chat" if title is missing
-    const title = c.title || "New Chat"
-    return title.toLowerCase().includes(query.toLowerCase())
-  })
+    if (propConversations.length === 0) {
+        const fetchData = async () => {
+        if (hasFetched.current) {
+            setLoading(false);
+            return;
+        }
+        hasFetched.current = true;
+
+        const localUser = localStorage.getItem("user")
+        if (localUser && !cachedUser) {
+            try { 
+                const parsed = JSON.parse(localUser)
+                setInternalUser(parsed) 
+                cachedUser = parsed
+            } catch (e) {}
+        }
+
+        try {
+            setLoading(true)
+            const [chats, profile] = await Promise.allSettled([
+            api.chat.list().catch(() => []),
+            api.user.getProfile().catch(() => null)
+            ])
+
+            if (chats.status === "fulfilled") {
+            const newChats = chats.value || []
+            setInternalConversations(newChats)
+            cachedConversations = newChats 
+            }
+            
+            if (profile.status === "fulfilled" && profile.value) {
+            setInternalUser(profile.value)
+            cachedUser = profile.value
+            localStorage.setItem("user", JSON.stringify(profile.value))
+            } else if (profile.status === "fulfilled" && !profile.value) {
+            setInternalUser(null) 
+            cachedUser = null
+            }
+        } catch (error) {
+            console.error("Failed to fetch sidebar data", error)
+        } finally {
+            setLoading(false)
+        }
+        }
+        fetchData()
+    } else {
+        setLoading(false)
+    }
+
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [propConversations.length])
 
   const handleCreateChat = () => {
-    onSelect(null) 
+    if (createNewChat) createNewChat() 
+    else onSelect(null) 
+    
     if (window.innerWidth < 768) onClose()
   }
 
   const handleDeleteChat = async (id: string) => {
+    if (onDeleteChat) {
+        onDeleteChat(id)
+    } else {
+        try {
+            await api.chat.delete(id)
+            const updated = internalConversations.filter(c => c.id !== id)
+            setInternalConversations(updated)
+            cachedConversations = updated 
+            if (selectedId === id) onSelect(null)
+        } catch (e) {
+            console.error("Delete failed", e)
+        }
+    }
+  }
+
+  // ✅ New Rename Function
+  const handleRenameChat = async (id: string, newTitle: string) => {
     try {
-        await api.chat.delete(id)
-        setConversations(prev => prev.filter(c => c.id !== id))
-        if (selectedId === id) onSelect(null)
+        // Optimistic update
+        const updated = internalConversations.map(c => 
+            c.id === id ? { ...c, title: newTitle } : c
+        )
+        setInternalConversations(updated)
+        cachedConversations = updated
+
+        // Call API
+        await api.chat.rename(id, newTitle)
     } catch (e) {
-        console.error("Delete failed", e)
+        console.error("Rename failed", e)
+        // Revert on fail if needed, or just let it be for now
     }
   }
 
@@ -158,7 +212,6 @@ export default function Sidebar({
     )
   }
 
-  // --- Render Collapsed ---
   if (sidebarCollapsed) {
     return (
       <motion.aside
@@ -172,10 +225,10 @@ export default function Sidebar({
           </button>
         </div>
         <div className="flex flex-col items-center gap-4 pt-4">
-          <button onClick={handleCreateChat} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button onClick={handleCreateChat} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800" title="New Chat">
             <Plus className="h-5 w-5" />
           </button>
-          <button onClick={() => setShowSearchModal(true)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button onClick={() => setShowSearchModal(true)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Search">
             <SearchIcon className="h-5 w-5" />
           </button>
         </div>
@@ -183,12 +236,14 @@ export default function Sidebar({
     )
   }
 
-  // --- Render Full ---
+  const shouldRenderSidebar = !isMobile || open
+
   return (
     <>
       <AnimatePresence>
-        {open && (
+        {open && isMobile && (
           <motion.div
+            key="overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
@@ -199,81 +254,87 @@ export default function Sidebar({
       </AnimatePresence>
 
       <AnimatePresence>
-        {(open || typeof window !== "undefined") && (
+        {shouldRenderSidebar && (
           <motion.aside
-            initial={{ x: -340 }}
-            animate={{ x: open ? 0 : 0 }}
+            key="sidebar"
+            initial={{ x: isMobile ? -340 : 0 }}
+            animate={{ x: 0 }}
             exit={{ x: -340 }}
             transition={{ type: "spring", stiffness: 260, damping: 28 }}
             className={cls(
               "z-50 flex h-full w-80 shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900",
-              "fixed inset-y-0 left-0 md:static md:translate-x-0",
+              isMobile ? "fixed inset-y-0 left-0" : "static translate-x-0"
             )}
           >
-            {/* Header */}
-            <div className="flex items-center gap-2 border-b border-zinc-200/60 px-3 py-3 dark:border-zinc-800">
-              <div className="flex items-center gap-2">
-                <div className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-500 text-white shadow-sm">
-                  <span className="font-bold text-lg">AI</span>
+            {/* Header Section */}
+            <div className="flex flex-col">
+              
+              <div className="flex items-center justify-between px-3 py-3">
+                <button 
+                  onClick={() => setShowSearchModal(true)} 
+                  className="rounded-xl p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                  title="Search Chats"
+                >
+                  <SearchIcon className="h-5 w-5" />
+                </button>
+
+                <div className="flex items-center">
+                    <button 
+                      onClick={() => setSidebarCollapsed(true)} 
+                      className="hidden md:block rounded-xl p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                      title="Collapse Sidebar"
+                    >
+                      <PanelLeftClose className="h-5 w-5" />
+                    </button>
+
+                    <button 
+                      onClick={onClose} 
+                      className="md:hidden rounded-xl p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    >
+                      <PanelLeftClose className="h-5 w-5" />
+                    </button>
                 </div>
-                <div className="text-sm font-semibold tracking-tight">AI Assistant</div>
               </div>
-              <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => setSidebarCollapsed(true)} className="hidden md:block rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                  <PanelLeftClose className="h-5 w-5" />
-                </button>
-                <button onClick={onClose} className="md:hidden rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                  <PanelLeftClose className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
 
-            {/* Search Input (Updated to be interactive) */}
-            <div className="px-3 pt-3">
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search chats..."
-                  className="w-full rounded-full border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none hover:bg-zinc-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-950/50 dark:hover:bg-zinc-900"
-                />
-              </div>
-            </div>
+              <div className="h-px w-full bg-zinc-200/60 dark:bg-zinc-800"></div>
 
-            {/* New Chat Button */}
-            <div className="px-3 pt-3">
-              <button
-                onClick={handleCreateChat}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
-              >
-                <Plus className="h-4 w-4" /> Start New Chat
-              </button>
+              <div className="px-3 py-3">
+                <button 
+                    onClick={handleCreateChat} 
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-zinc-900 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-900"
+                >
+                    <Plus className="h-4 w-4" />
+                    <span>Start New Chat</span>
+                </button>
+              </div>
+
             </div>
 
             {/* Chat List */}
-            <nav className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-4">
+            <nav className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2 pb-4 pt-2">
               <SidebarSection
                 icon={<Clock className="h-4 w-4" />}
-                title={query ? "SEARCH RESULTS" : "RECENT CHATS"}
+                title={"RECENT CHATS"}
                 collapsed={collapsed.recent}
                 onToggle={() => setCollapsed((s: any) => ({ ...s, recent: !s.recent }))}
               >
-                {!mounted || loading ? (
+                {!mounted || (loading && !cachedConversations && propConversations.length === 0) ? (
                     <div className="px-4 py-2 text-xs text-zinc-400">Loading chats...</div>
-                ) : filteredConversations.length === 0 ? (
+                ) : conversations.length === 0 ? (
                   <div className="select-none rounded-lg border border-dashed border-zinc-200 px-3 py-3 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                    {query ? "No chats found." : "No conversations yet."}
+                    No conversations yet.
                   </div>
                 ) : (
-                  filteredConversations.map((c) => (
+                  conversations.map((c) => (
                     <ConversationRow
                       key={c.id}
                       data={c}
                       active={c.id === selectedId}
-                      onSelect={() => onSelect(c.id)}
-                      onTogglePin={() => {}}
+                      onSelect={() => {
+                        onSelect(c.id)
+                        if (isMobile) onClose()
+                      }}
+                      onRename={(newTitle: string) => handleRenameChat(c.id, newTitle)} // ✅ Passed onRename
                       onDelete={() => handleDeleteChat(c.id)}
                       showMeta={true}
                     />
@@ -282,13 +343,11 @@ export default function Sidebar({
               </SidebarSection>
             </nav>
 
-            {/* Footer */}
             <div className="mt-auto border-t border-zinc-200/60 px-3 py-3 dark:border-zinc-800">
               <div className="flex items-center justify-between mb-2">
-                 <button className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                    <Settings className="w-5 h-5" />
-                 </button>
-                 <ThemeToggle theme={theme} setTheme={setTheme} />
+                 <div className="ml-auto">
+                    <ThemeToggle theme={theme} setTheme={setTheme} />
+                 </div>
               </div>
               
               {renderUserSection()}

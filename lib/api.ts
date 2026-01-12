@@ -24,6 +24,7 @@ export interface ChatSession {
   id: string;
   title: string;
   created_at: string;
+  message_count: number;
 }
 
 export interface Message {
