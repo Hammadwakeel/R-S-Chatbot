@@ -6,7 +6,8 @@ import {
   Search as SearchIcon, 
   Plus, 
   Clock, 
-  LogIn 
+  LogIn,
+  Database // ✅ Imported Database Icon
 } from 'lucide-react'
 import SidebarSection from "./SidebarSection"
 import ConversationRow from "./ConversationRow"
@@ -155,17 +156,13 @@ export default function Sidebar({
     }
   }
 
-  // ✅ New Rename Function
   const handleRenameChat = async (id: string, newTitle: string) => {
     try {
-        // Optimistic update
         const updated = internalConversations.map(c => 
             c.id === id ? { ...c, title: newTitle } : c
         )
         setInternalConversations(updated)
         cachedConversations = updated
-
-        // Call API
         await api.chat.rename(id, newTitle)
     } catch (e) {
         console.error("Rename failed", e)
@@ -216,7 +213,6 @@ export default function Sidebar({
       <motion.aside
         initial={{ width: 320 }}
         animate={{ width: 64 }}
-        // ✅ CHANGED: Increased z-index to 100 to stay above Composer
         className="z-[100] flex h-full shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900"
       >
         <div className="flex items-center justify-center border-b border-zinc-200/60 px-3 py-3 dark:border-zinc-800">
@@ -231,6 +227,15 @@ export default function Sidebar({
           <button onClick={() => setShowSearchModal(true)} className="rounded-xl p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Search">
             <SearchIcon className="h-5 w-5" />
           </button>
+          
+          {/* ✅ Mini Sidebar: Admin Button */}
+          {userData?.role === 'admin' && (
+            <Link href="/admin">
+              <button className="rounded-xl p-2 text-zinc-500 hover:bg-orange-100 hover:text-orange-600 dark:text-zinc-400 dark:hover:bg-orange-900/30 dark:hover:text-orange-500" title="Admin Dashboard">
+                <Database className="h-5 w-5" />
+              </button>
+            </Link>
+          )}
         </div>
       </motion.aside>
     )
@@ -247,7 +252,6 @@ export default function Sidebar({
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.5 }}
             exit={{ opacity: 0 }}
-            // ✅ CHANGED: Increased z-index to 90 (above Composer's z-50)
             className="fixed inset-0 z-[90] bg-black/60 md:hidden"
             onClick={onClose}
           />
@@ -263,7 +267,6 @@ export default function Sidebar({
             exit={{ x: -340 }}
             transition={{ type: "spring", stiffness: 260, damping: 28 }}
             className={cls(
-              // ✅ CHANGED: Increased z-index to 100
               "z-[100] flex h-full w-80 shrink-0 flex-col border-r border-zinc-200/60 bg-white dark:border-zinc-800 dark:bg-zinc-900",
               isMobile ? "fixed inset-y-0 left-0" : "static translate-x-0"
             )}
@@ -347,7 +350,21 @@ export default function Sidebar({
 
             <div className="mt-auto border-t border-zinc-200/60 px-3 py-3 dark:border-zinc-800">
               <div className="flex items-center justify-between mb-2">
-                 <div className="ml-auto">
+                 
+                 {/* ✅ ADMIN BUTTON: Aligned Left */}
+                 {userData?.role === 'admin' && (
+                    <Link href="/admin">
+                      <button 
+                        className="rounded-xl p-2 text-zinc-500 hover:bg-orange-100 hover:text-orange-600 dark:text-zinc-400 dark:hover:bg-orange-900/30 dark:hover:text-orange-500 transition-colors"
+                        title="Admin Ingestion Dashboard"
+                      >
+                        <Database className="h-5 w-5" />
+                      </button>
+                    </Link>
+                 )}
+
+                 {/* THEME TOGGLE: Aligned Right */}
+                 <div className={userData?.role !== 'admin' ? "ml-auto" : ""}> 
                     <ThemeToggle theme={theme} setTheme={setTheme} />
                  </div>
               </div>

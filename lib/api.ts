@@ -3,6 +3,7 @@
 // --- Configuration ---
 // Use environment variable if available, otherwise default to localhost
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const INGESTION_BASE_URL = "https://hammad712-ingestion.hf.space";
 
 // --- Types & Interfaces ---
 
@@ -106,6 +107,65 @@ export async function signup(full_name: string, email: string, password: string)
 }
 
 // ==========================================
+// 📂 FILE INGESTION UTILITY (Standalone)
+// ==========================================
+
+interface IngestionCallbacks {
+  onProgress: (progress: number, message: string) => void;
+  onError: (message: string) => void;
+  onComplete: (downloadUrl: string | null, fileName: string | null) => void;
+}
+
+export const ingestPdfStream = async (
+  file: File,
+  callbacks: IngestionCallbacks
+) => {
+  const { onProgress, onError, onComplete } = callbacks;
+
+  if (!file) {
+    onError("No file provided");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const xhr = new XMLHttpRequest();
+  // Endpoint for PDF processing
+  const UPLOAD_URL = `${INGESTION_BASE_URL}/process/pdf/stream`; 
+
+  xhr.open("POST", UPLOAD_URL, true);
+
+  // Track Upload Progress
+  xhr.upload.onprogress = (event) => {
+    if (event.lengthComputable) {
+      const percentComplete = (event.loaded / event.total) * 100;
+      onProgress(percentComplete, `Uploading ${Math.round(percentComplete)}%...`);
+    }
+  };
+
+  // Handle Response
+  xhr.onload = () => {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        const response = JSON.parse(xhr.responseText);
+        onComplete(response.download_url, response.filename);
+      } catch (e) {
+        onComplete(null, null); // Successful upload but parsing failed
+      }
+    } else {
+      onError(`Upload failed: ${xhr.statusText}`);
+    }
+  };
+
+  xhr.onerror = () => {
+    onError("Network error during upload.");
+  };
+
+  xhr.send(formData);
+};
+
+// ==========================================
 // 🚀 MAIN API OBJECT (For Chat & App Logic)
 // ==========================================
 
@@ -113,8 +173,8 @@ export const api = {
   
   // --- Auth Wrappers ---
   auth: {
-    login, // Reuses function above
-    signup, // Reuses function above
+    login, 
+    signup, 
     logout: () => {
       localStorage.removeItem("accessToken");
       localStorage.removeItem("refreshToken");
@@ -131,7 +191,6 @@ export const api = {
     getProfile: () => 
       request<User>("/users/me"),
     
-    // Updated to accept avatar_url and password
     updateProfile: (data: { full_name?: string; avatar_url?: string; password?: string }) => 
       request<User>("/users/me", {
         method: "PATCH",
@@ -157,6 +216,18 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ title }),
       }),
+  },
+
+  // --- Ingestion Management (Admin Dashboard) ---
+  ingestion: {
+    list: async () => {
+      const res = await fetch(`${INGESTION_BASE_URL}/files/list`);
+      if (!res.ok) throw new Error("Failed to fetch files");
+      return res.json();
+    },
+    getDownloadUrl: (filename: string) => {
+      return `${INGESTION_BASE_URL}/files/download?filename=${encodeURIComponent(filename)}`;
+    }
   },
 
   // --- Message Handling ---
