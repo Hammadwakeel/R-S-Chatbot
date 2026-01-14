@@ -1,24 +1,61 @@
-/* Added required Tailwind layer directives */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@keyframes float {
-    0%, 100% {
-      transform: translateY(0px);
-    }
-    50% {
-      transform: translateY(-8px);
-    }
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+  }
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+  }
+}
+
+@layer utilities {
+  /* =========================================
+     CUSTOM SCROLLBAR STYLES
+     ========================================= */
+
+  /* Width & Height of the scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;  /* Vertical scrollbar width */
+    height: 10px; /* Horizontal scrollbar height */
   }
 
-  @keyframes glowPulse {
-    0%, 100% {
-      opacity: 0.6;
-      transform: scale(1);
-    }
-    50% {
-      opacity: 0.9;
-      transform: scale(1.15);
-    }
+  /* The Track (Background of the scrollbar) */
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
+
+  /* The Handle (Thumb) - Base Styles */
+  ::-webkit-scrollbar-thumb {
+    border-radius: 9999px;       /* Fully rounded corners */
+    border: 3px solid transparent; /* Transparent border creates 'padding' */
+    background-clip: content-box;  /* Clips background to inside the border */
+    transition: background-color 0.2s ease;
+  }
+
+  /* ☀️ LIGHT MODE: "White" (Light Gray) 
+     Pure white is invisible on white pages, so we use a light gray (zinc-300) 
+     to represent the 'white' style while remaining visible. */
+  ::-webkit-scrollbar-thumb {
+    background-color: #d4d4d8; /* zinc-300 */
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: #a1a1aa; /* zinc-400 (Darker on hover) */
+  }
+
+  /* 🌙 DARK MODE: Black 
+     Using pure black or very dark gray for the dark mode request. */
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: #000000; /* Pure Black */
+    /* Optional: Use #18181b (zinc-900) if pure black is too dark */
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background-color: #27272a; /* zinc-800 (Lighter on hover) */
+  }
+}

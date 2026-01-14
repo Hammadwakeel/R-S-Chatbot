@@ -7,7 +7,7 @@ import {
   Plus, 
   Clock, 
   LogIn,
-  Database // ✅ Imported Database Icon
+  Database 
 } from 'lucide-react'
 import SidebarSection from "./SidebarSection"
 import ConversationRow from "./ConversationRow"
@@ -65,14 +65,25 @@ export default function Sidebar({
   const [showSearchModal, setShowSearchModal] = useState(false)
   const [isMobile, setIsMobile] = useState(false) 
 
-  const [internalConversations, setInternalConversations] = useState<ChatSession[]>(cachedConversations || [])
+  // ✅ Initialize state with props if available, otherwise cache
+  const [internalConversations, setInternalConversations] = useState<ChatSession[]>(
+    propConversations.length > 0 ? propConversations : (cachedConversations || [])
+  )
   const [internalUser, setInternalUser] = useState<User | null>(cachedUser)
   const [loading, setLoading] = useState(!cachedConversations) 
   
-  const conversations = propConversations.length > 0 ? propConversations : internalConversations
+  // ✅ Use internal state as the source of truth for rendering
+  const conversations = internalConversations;
   const userData = propUserData || internalUser
 
   const hasFetched = useRef(!!cachedConversations);
+
+  // ✅ Sync prop changes to internal state
+  useEffect(() => {
+    if (propConversations.length > 0) {
+      setInternalConversations(propConversations)
+    }
+  }, [propConversations])
 
   useEffect(() => {
     setMounted(true)
@@ -133,6 +144,17 @@ export default function Sidebar({
     return () => window.removeEventListener('resize', checkMobile)
   }, [propConversations.length])
 
+  // ✅ Helper to refresh the list from server
+  const refreshChats = async () => {
+    try {
+      const chats = await api.chat.list();
+      setInternalConversations(chats);
+      cachedConversations = chats;
+    } catch (e) {
+      console.error("Failed to refresh chats", e);
+    }
+  };
+
   const handleCreateChat = () => {
     if (createNewChat) createNewChat() 
     else onSelect(null) 
@@ -142,30 +164,49 @@ export default function Sidebar({
 
   const handleDeleteChat = async (id: string) => {
     if (onDeleteChat) {
+        // If parent provided a handler, use it (Parent should handle refresh)
         onDeleteChat(id)
     } else {
         try {
-            await api.chat.delete(id)
+            // 1. Optimistic Update (Immediate UI removal)
             const updated = internalConversations.filter(c => c.id !== id)
             setInternalConversations(updated)
             cachedConversations = updated 
+            
             if (selectedId === id) onSelect(null)
+
+            // 2. API Call
+            await api.chat.delete(id)
+
+            // 3. Re-fetch to ensure consistency
+            await refreshChats();
+
         } catch (e) {
             console.error("Delete failed", e)
+            // Revert on error (optional, but good practice would be to re-fetch here too)
+            refreshChats(); 
         }
     }
   }
 
   const handleRenameChat = async (id: string, newTitle: string) => {
     try {
+        // 1. Optimistic Update (Immediate UI change)
         const updated = internalConversations.map(c => 
             c.id === id ? { ...c, title: newTitle } : c
         )
         setInternalConversations(updated)
         cachedConversations = updated
+
+        // 2. API Call
         await api.chat.rename(id, newTitle)
+
+        // 3. Re-fetch to ensure consistency
+        await refreshChats();
+
     } catch (e) {
         console.error("Rename failed", e)
+        refreshChats(); 
     }
   }
 

@@ -1,7 +1,6 @@
 // src/lib/api.ts
 
 // --- Configuration ---
-// Use environment variable if available, otherwise default to localhost
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const INGESTION_BASE_URL = "https://hammad712-ingestion.hf.space";
 
@@ -12,7 +11,6 @@ export interface User {
   email: string;
   full_name?: string;
   avatar_url?: string;
-  // ✅ Added role for RBAC (Role Based Access Control)
   role: "user" | "admin"; 
 }
 
@@ -72,42 +70,31 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     throw new Error(errorData.detail || "API Request Failed");
   }
 
-  // Return null for 204 No Content
   if (response.status === 204) return null as T;
 
   return response.json();
 }
 
 // ==========================================
-// 🔐 AUTH METHODS (Standalone for Auth Pages)
+// 🔐 AUTH METHODS
 // ==========================================
 
-/**
- * Authenticate user.
- * Used by: LoginPage
- */
 export async function login(email: string, password: string): Promise<AuthResponse> {
-  const data = await request<AuthResponse>("/auth/login", {
+  return request<AuthResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  return data;
 }
 
-/**
- * Register new user.
- * Used by: SignupPage
- */
 export async function signup(full_name: string, email: string, password: string): Promise<User> {
-  const data = await request<User>("/auth/signup", {
+  return request<User>("/auth/signup", {
     method: "POST",
     body: JSON.stringify({ email, password, full_name }),
   });
-  return data;
 }
 
 // ==========================================
-// 📂 FILE INGESTION UTILITY (Standalone)
+// 📂 FILE INGESTION UTILITY
 // ==========================================
 
 interface IngestionCallbacks {
@@ -116,6 +103,7 @@ interface IngestionCallbacks {
   onComplete: (downloadUrl: string | null, fileName: string | null) => void;
 }
 
+// --- Legacy: Single PDF Stream (XHR based) ---
 export const ingestPdfStream = async (
   file: File,
   callbacks: IngestionCallbacks
@@ -131,12 +119,10 @@ export const ingestPdfStream = async (
   formData.append("file", file);
 
   const xhr = new XMLHttpRequest();
-  // Endpoint for PDF processing
   const UPLOAD_URL = `${INGESTION_BASE_URL}/process/pdf/stream`; 
 
   xhr.open("POST", UPLOAD_URL, true);
 
-  // Track Upload Progress
   xhr.upload.onprogress = (event) => {
     if (event.lengthComputable) {
       const percentComplete = (event.loaded / event.total) * 100;
@@ -144,34 +130,134 @@ export const ingestPdfStream = async (
     }
   };
 
-  // Handle Response
   xhr.onload = () => {
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         const response = JSON.parse(xhr.responseText);
         onComplete(response.download_url, response.filename);
       } catch (e) {
-        onComplete(null, null); // Successful upload but parsing failed
+        onComplete(null, null); 
       }
     } else {
-      onError(`Upload failed: ${xhr.statusText}`);
+      let errorMsg = `Upload failed: ${xhr.statusText}`;
+      try {
+        const errorResponse = JSON.parse(xhr.responseText);
+        if (errorResponse && errorResponse.detail) {
+          errorMsg = errorResponse.detail; 
+        }
+      } catch (e) {
+        console.error("Could not parse error response", e);
+      }
+      onError(errorMsg);
     }
   };
 
   xhr.onerror = () => {
-    onError("Network error during upload.");
+    onError("Network connection error. Please check your internet.");
   };
 
   xhr.send(formData);
 };
 
+// --- NEW: Bulk/Smart Ingestion (Fetch Stream based) ---
+
+export interface BulkIngestionCallbacks {
+  onStatusUpdate: (event: any) => void; // Handles generic events like "batch_start", "file_finished"
+  onError: (message: string) => void;
+  onComplete: (reportUrl: string | null) => void;
+}
+
+export const ingestBulkDocument = async (
+  file: File,
+  callbacks: BulkIngestionCallbacks
+) => {
+  const { onStatusUpdate, onError, onComplete } = callbacks;
+
+  if (!file) {
+    onError("No file provided");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    // Note: We use the /process/process-document endpoint which supports SSE responses
+    const response = await fetch(`${INGESTION_BASE_URL}/process/process-document`, {
+      method: "POST",
+      body: formData, 
+      // Do NOT set Content-Type header manually when using FormData, 
+      // the browser sets it with the boundary automatically.
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      let errMsg = "Upload failed";
+      try {
+        const jsonErr = JSON.parse(errText);
+        errMsg = jsonErr.detail || errMsg;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    if (!response.body) throw new Error("No response stream received");
+
+    // Reading the SSE Stream
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n\n");
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const jsonStr = line.replace("data: ", "").trim();
+          if (!jsonStr) continue;
+
+          try {
+            const eventData = JSON.parse(jsonStr);
+
+            // 1. Pass raw event to UI for granular updates (e.g. "Processing file 1/5...")
+            onStatusUpdate(eventData);
+
+            // 2. Check for Completion
+            if (eventData.event === "batch_completed") {
+              onComplete(eventData.master_report_url);
+              return; // Stop reading
+            }
+            if (eventData.event === "completed") {
+              onComplete(eventData.report_url);
+              return; // Stop reading
+            }
+
+            // 3. Check for Fatal Errors
+            if (eventData.event === "fatal_error" || eventData.event === "error") {
+              onError(eventData.error || "Unknown processing error");
+              return;
+            }
+
+          } catch (e) {
+            console.warn("Failed to parse SSE event:", jsonStr);
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    onError(err.message || "Network error during bulk processing");
+  }
+};
+
+
 // ==========================================
-// 🚀 MAIN API OBJECT (For Chat & App Logic)
+// 🚀 MAIN API OBJECT
 // ==========================================
 
 export const api = {
   
-  // --- Auth Wrappers ---
   auth: {
     login, 
     signup, 
@@ -181,12 +267,10 @@ export const api = {
       localStorage.removeItem("tokenType");
       localStorage.removeItem("user");
       localStorage.removeItem("authSession");
-      // Optional: Redirect to login
       window.location.href = "/login";
     },
   },
 
- // --- Users ---
   user: {
     getProfile: () => 
       request<User>("/users/me"),
@@ -198,7 +282,6 @@ export const api = {
       }),
   },
 
-  // --- Chat Management (Sidebar) ---
   chat: {
     list: () => 
       request<ChatSession[]>("/chat/history"),
@@ -218,16 +301,43 @@ export const api = {
       }),
   },
 
-  // --- Ingestion Management (Admin Dashboard) ---
   ingestion: {
     list: async () => {
       const res = await fetch(`${INGESTION_BASE_URL}/files/list`);
       if (!res.ok) throw new Error("Failed to fetch files");
       return res.json();
     },
+    
     getDownloadUrl: (filename: string) => {
       return `${INGESTION_BASE_URL}/files/download?filename=${encodeURIComponent(filename)}`;
-    }
+    },
+
+    delete: async (filename: string) => {
+      const res = await fetch(`${INGESTION_BASE_URL}/files/${encodeURIComponent(filename)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to delete file");
+      }
+      return res.json();
+    },
+
+    rename: async (oldFilename: string, newFilename: string) => {
+      const res = await fetch(`${INGESTION_BASE_URL}/files/${encodeURIComponent(oldFilename)}/rename`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_filename: newFilename }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to rename file");
+      }
+      return res.json();
+    },
+
+    // ✅ Exposed here for convenient access via api.ingestion.uploadBulk(...)
+    uploadBulk: ingestBulkDocument
   },
 
   // --- Message Handling ---
@@ -292,7 +402,6 @@ export const api = {
     }
   },
 
-  // --- Edit Message ---
   editMessage: async (
     messageId: string, 
     newContent: string,
@@ -326,7 +435,6 @@ export const api = {
             }
             try {
               const parsed = JSON.parse(dataStr);
-              
               if (parsed.error) {
                 console.error("Stream Error:", parsed.error);
                 onChunk(`\n\n**Error:** ${parsed.error}`); 
