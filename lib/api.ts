@@ -11,6 +11,8 @@ export interface User {
   email: string;
   full_name?: string;
   avatar_url?: string;
+  // ✅ Added role for RBAC (Role Based Access Control)
+  role: "user" | "admin"; 
 }
 
 export interface AuthResponse {
@@ -164,14 +166,14 @@ export const api = {
     onChunk: (content: string, threadId?: string) => void,
     onError: (error: string) => void,
     onDone: () => void,
-    signal?: AbortSignal // 🆕 Add this parameter
+    signal?: AbortSignal
   ) => {
     try {
       const response = await fetch(`${API_BASE_URL}/chat/message/stream`, {
         method: "POST",
         headers: getHeaders(),
         body: JSON.stringify({ message, thread_id: threadId }),
-        signal: signal, // 🆕 Pass signal to fetch
+        signal: signal, 
       });
 
       if (!response.ok) {
@@ -212,14 +214,14 @@ export const api = {
     } catch (err: any) {
       if (err.name === 'AbortError') {
         console.log("Stream stopped by user");
-        onDone(); // Treat abort as "done" so UI unlocks
+        onDone(); 
       } else {
         onError(err.message || "Stream failed");
       }
     }
   },
 
-  // src/lib/api.ts -> inside api object -> editMessage function
+  // --- Edit Message ---
   editMessage: async (
     messageId: string, 
     newContent: string,
@@ -253,10 +255,10 @@ export const api = {
             }
             try {
               const parsed = JSON.parse(dataStr);
-              // ✅ FIX: Handle errors explicitly
+              
               if (parsed.error) {
                 console.error("Stream Error:", parsed.error);
-                onChunk(`\n\n**Error:** ${parsed.error}`); // Show error in chat bubble
+                onChunk(`\n\n**Error:** ${parsed.error}`); 
               } else if (parsed.content) {
                 onChunk(parsed.content);
               }
@@ -268,4 +270,4 @@ export const api = {
       if (err.name !== 'AbortError') console.error("Edit stream failed", err);
     }
   }
-}
+};
