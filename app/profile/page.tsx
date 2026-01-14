@@ -126,20 +126,23 @@ export default function ProfilePage() {
         payload.password = formData.newPassword
       }
 
+      // Call API
       const updatedUser = await api.user.updateProfile(payload)
 
-      if (previewImage) {
-        setProfileImage(previewImage)
-        setPreviewImage(null)
+      // ✅ FIX: Use the server response to update UI state
+      // This ensures we display the actual URL saved on the server
+      if (updatedUser.avatar_url) {
+        setProfileImage(updatedUser.avatar_url)
       }
+      setPreviewImage(null)
       
+      // ✅ FIX: Cleaner LocalStorage Update
       const cachedUser = localStorage.getItem("user")
       if (cachedUser) {
         const parsed = JSON.parse(cachedUser)
         localStorage.setItem("user", JSON.stringify({ 
           ...parsed, 
-          full_name: updatedUser.full_name || formData.name, 
-          avatar_url: updatedUser.avatar_url || parsed.avatar_url 
+          ...updatedUser // Merge all fresh data from server
         }))
       }
 
@@ -178,17 +181,14 @@ export default function ProfilePage() {
   }
 
   return (
-    // ✅ Updated Container: Deep dark background (zinc-950) for maximum contrast
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 relative overflow-hidden pb-8 bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300">
       
-      {/* Background Gradient - Lighter/Darker Logic */}
       <div 
         className="absolute inset-0 -z-10 dark:hidden"
         style={{
           background: "linear-gradient(135deg, #ffffff 0%, #fff5f7 35%, #ffe8f0 65%, #ffd6e8 100%)"
         }}
       ></div>
-      {/* ✅ Dark Mode Gradient: Very subtle, mostly black/zinc to allow content to pop */}
       <div 
         className="absolute inset-0 -z-10 hidden dark:block"
         style={{
@@ -203,7 +203,6 @@ export default function ProfilePage() {
       <div className="absolute top-6 left-6 z-20">
         <button
           onClick={() => router.push("/")}
-          // ✅ Updated Link: High contrast hover states
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
@@ -212,10 +211,8 @@ export default function ProfilePage() {
       </div>
 
       <div className="w-full max-w-2xl mt-12 md:mt-0">
-        {/* ✅ Updated Card: Solid Zinc-900 background in dark mode (no transparency) for better readability */}
         <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
           
-          {/* Header */}
           <div className="px-6 md:px-8 pt-8 md:pt-10 pb-6 text-center border-b border-zinc-200 dark:border-zinc-800">
             <h1 className="text-3xl md:text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
               Profile Settings
@@ -225,7 +222,6 @@ export default function ProfilePage() {
             </p>
           </div>
 
-          {/* Content */}
           <div className="px-6 md:px-8 py-8 md:py-10">
             {successMessage && (
               <div className="mb-6 p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
@@ -240,10 +236,10 @@ export default function ProfilePage() {
             )}
 
             <form onSubmit={handleSaveProfile} className="space-y-8">
-              {/* Profile Image */}
               <div className="flex flex-col items-center gap-4">
                 <div className="relative group">
                   <div className="w-32 h-32 rounded-full overflow-hidden bg-zinc-100 dark:bg-black p-1 shadow-lg ring-1 ring-zinc-200 dark:ring-zinc-700">
+                    {/* Priority: Preview -> Current State -> Placeholder */}
                     {previewImage || profileImage ? (
                       <img 
                         src={previewImage || profileImage || ""} 
@@ -286,7 +282,6 @@ export default function ProfilePage() {
 
               <div className="border-t border-zinc-200 dark:border-zinc-800" />
 
-              {/* Form Fields - Updated with high contrast inputs */}
               <div className="space-y-6">
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-zinc-700 dark:text-zinc-200">Full Name</Label>
@@ -294,7 +289,6 @@ export default function ProfilePage() {
                     id="name"
                     value={formData.name}
                     onChange={handleInputChange}
-                    // ✅ Input Update: Darker background, lighter text, visible border
                     className="py-6 bg-white dark:bg-black border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-purple-500 dark:focus:ring-purple-400"
                   />
                   {errors.name && <p className="text-sm text-red-500 dark:text-red-400">{errors.name}</p>}
@@ -312,7 +306,6 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* Password Section - Updated contrast */}
               <div className="space-y-4 p-6 rounded-xl bg-zinc-50 dark:bg-zinc-800/30 border border-zinc-200 dark:border-zinc-800">
                 <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Change Password</h3>
                 
@@ -342,7 +335,6 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex flex-col sm:flex-row gap-4 pt-2">
                 <Button
                   type="submit"
@@ -356,7 +348,6 @@ export default function ProfilePage() {
                   type="button"
                   onClick={handleLogout}
                   variant="outline"
-                  // ✅ Secondary Button: High contrast border in dark mode
                   className="flex-1 py-6 text-base font-semibold border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                 >
                   Sign Out
